@@ -50,7 +50,7 @@ class Application(Base):
 	size = -1
 
 
-	def __init__(self, name, desiredSamples, 
+	def __init__(self, name, desiredSamples,
 				maxSupportedSamples = sys.maxint-1,
 				maxProfilingTime = sys.maxint-1,
 				preProcessScript = None,
@@ -63,17 +63,17 @@ class Application(Base):
 				profile = None,
 				finished = 0,
 				schedulingAlgorithm = "",
-				remoteMontera = "maxSamples.sh", 
+				remoteMontera = "maxSamples.sh",
 				infrastructure = None
 				):
 		'''
 		Constructor
 		'''
-		
-		
+
+
 		self.name = name
-		
-		
+
+
 		#sample stuff
 		self.desiredSamples = desiredSamples
 		self.remainingSamples = desiredSamples
@@ -91,22 +91,22 @@ class Application(Base):
 		#que es ella la que lo va a emplear en esa ocasión
 		#eso es necesario si hay que hacer algún profiling de la aplicación, para poder coger
 		#archivos de entrada, salida y demás
-		
+
 		self.profile = profile
 		self.profile.application = self
 
 		#fprocessing script
 		self.preProcessScript = preProcessScript
 		self.postProcessScript=postProcessScript
-		
+
 		#input and output files
 		self.inputFiles=inputFiles
 		self.outputFiles=outputFiles
 		self.workingDirectory = workingDirectory
 		self.size = -1
 		self.size = self.calculateInputFileSize()
-		
-		
+
+
 		#other stuff
 		self.requirements=requirements
 		self.environment=environment
@@ -114,18 +114,18 @@ class Application(Base):
 		self.schedulingAlgorithm = schedulingAlgorithm
 		self.remoteMontera = remoteMontera
 		self.infrastructure = infrastructure
-		
+
 	#NOTA: el status final de la tarea hay que ponerlo como  "CLEAR"
 	def updateInfoAfterExecution(self, gridTask):
-		
+
 		print("Updating info after exetcution of task " +gridTask.gwID + " on host " + gridTask.host.hostname + " (hostID " + str(gridTask.host.id) + ")")
 		gridTask.status="CLEAR"
 
 		#1.- abrir el archivo correspondiente a esa task
 		hostToUpdate = gridTask.host
-				
+
 		execution_file = base.tmpExecutionFolder + "/execution_result_" + gridTask.gwID + ".xml"
-		
+
 		#1.- abrir el archivo correspondiente a esa task
 		try:
 			doc = xml.dom.minidom.parse(execution_file)
@@ -134,10 +134,10 @@ class Application(Base):
 			hostToUpdate.updateInfoAfterFailedExecution()
 			Session.add(gridTask)
 			return
-		
+
 		#si los archivos de salida deseados no existen, también la cuento como fallida
 		for outputFile in self.outputFiles.split(","):
-			
+
 			#JOB_ID has to be replaced by gwID as it happens along the execution
 			splittedFile = outputFile.split('JOB_ID')
 			output=""
@@ -145,24 +145,24 @@ class Application(Base):
 				output += splittedFile[pos]
 				if pos < len(splittedFile) -1:
 					output+=gridTask.gwID
-				
-			
+
+
 			if not os.path.exists(base.tmpExecutionFolder + "/" + output):
 					print("failed when updating info after execution. output file " + base.tmpExecutionFolder + "/"  + output + " could not be found")
 					hostToUpdate.updateInfoAfterFailedExecution()
 					Session.add(gridTask)
-					return	
-		
+					return
+
 		executionInfoList = doc.getElementsByTagName('execution_info')
-		
+
 		gridTaskType = None
 		remoteHostName = None
 		executionTime = None
 		dataSize = None
 		realSamples = None
-		
+
 		for executionData in executionInfoList:
-			
+
 			try:
 				gridTaskType = executionData.getElementsByTagName("type")[0].firstChild.data #TODO: remove "unicode" from TEXT
 				remoteHostName = executionData.getElementsByTagName("hostname")[0].firstChild.data
@@ -175,30 +175,30 @@ class Application(Base):
 				return
 
 		#2.- procesar los resultados
-			
+
 		if gridTaskType != "execution":
 			print ("ERROR when updating info from an application execution")
 			print("Incorrect task type, expecting \"execution\"")
 			gridTask.status = "CLEAR"
 			Session.add(gridTask)
 			return
-			
+
 		if remoteHostName != hostToUpdate.hostname:
 			print ("ERROR when updating info from a application execution")
 			print("Incorrect host name, expecting " + hostToUpdate.hostname)
 			gridTask.status = "CLEAR"
 			Session.add(gridTask)
 			return
-	
-	
+
+
 		if executionTime == 0:
 			print ("ERROR when updating info from an application execution")
 			print ("Execution time appears to be zero, and that's quite strange")
 			gridTask.status = "CLEAR"
 			hostToUpdate.updateInfoAfterFailedExecution()
 			Session.add(gridTask)
-			return 
-		
+			return
+
 		totalActiveTime = InformationManager.readTotalActiveTime(gridTask.gwID)
 		if totalActiveTime == -1:
 			print ("ERROR when updating info from an application execution")
@@ -206,8 +206,8 @@ class Application(Base):
 			gridTask.status = "CLEAR"
 			hostToUpdate.updateInfoAfterFailedExecution()
 			Session.add(gridTask)
-			return 
-		
+			return
+
 		queueTime = InformationManager.readQueueTime(gridTask.gwID)
 		if queueTime == -1:
 			print ("ERROR when updating info from an application execution")
@@ -215,29 +215,29 @@ class Application(Base):
 			gridTask.status = "CLEAR"
 			hostToUpdate.updateInfoAfterFailedExecution()
 			Session.add(gridTask)
-			return 
-		
-		
+			return
+
+
 		transferTime = totalActiveTime - executionTime
 		if transferTime > 0:
 			bandwidth = dataSize / transferTime
 		else:
 			bandwidth = -1
 		#3.- actualizar rendimiento del host
-		
+
 		computationalEffort = self.profile.constantEffort + self.profile.sampleEffort * realSamples
 		whetstones = computationalEffort / executionTime
-		
+
 		hostToUpdate.updateInfoFromSuccessFulExecution(whetstones, queueTime, bandwidth)
 		hostToUpdate.failedProfilings -=1
-		
+
 		#4 actualizar estado de la tarea y la apliación.
 		gridTask.realSamples = realSamples
 		gridTask.status = "CLEAR"
 		self.remainingSamples -= realSamples
-		
-		print("APPLICATION UPDATE: " + str(self.remainingSamples) + "/" + str(self.desiredSamples) + " left")		
-	
+
+		print("APPLICATION UPDATE: " + str(self.remainingSamples) + "/" + str(self.desiredSamples) + " left")
+
 		#5.- eliminar archivos temporales
 		try:
 			#os.remove(execution_file)
@@ -251,10 +251,10 @@ class Application(Base):
 
 		Session.add(gridTask)
 		Session.add(self)
-		
-	
+
+
 	def updateInfoAfterProfiling(self, gridTask):
-		
+
 		#1.- leer la info  correspondiente a esa aplicacion
 		#tener en cuenta que es una serie de parejas de valores
 		execution_file = base.tmpExecutionFolder + "execution_result_" + gridTask.gwID + ".xml"
@@ -265,24 +265,24 @@ class Application(Base):
 			gridTask.host.updateInfoAfterFailedProfiling()
 			Session.add(gridTask.host)
 			return
-	
+
 		executionInfoList = doc.getElementsByTagName('results')
-		
+
 		executionResults=[]
 		for executionData in executionInfoList:
 			profileInfoList = executionData.getElementsByTagName('profile')
-			for profileInfo in profileInfoList: 
+			for profileInfo in profileInfoList:
 				samples = int(profileInfo.getElementsByTagName("samples")[0].firstChild.data) #TODO: remove "unicode" from TEXT
 				time = int(profileInfo.getElementsByTagName("time")[0].firstChild.data)
-				
+
 				if samples == 0:
 					print ("There was an error on host " + gridTask.host.hostname + ". File " + execution_file + ", no samples have been executed")
 					gridTask.host.updateInfoAfterFailedProfiling()
 					Session.add(gridTask.host)
-					return 
+					return
 				executionResults.append([samples, time])
-		
-		
+
+
 		#2.- procesar los resultados
 		#TODO: esto es muy posible que esté mal
 		numSimulations = len(executionResults)
@@ -290,38 +290,38 @@ class Application(Base):
 			print ("There was an error on host " + gridTask.host.hostname + ". File " + execution_file + ", no simulations performed")
 			gridTask.host.updateInfoAfterFailedProfiling()
 			Session.add(gridTask.host)
-			return 
+			return
 		avgSampleTime = 0
 		for i in range(numSimulations-1):
 			newSamples = executionResults[i+1][0] - executionResults[i][0]
 			newTime = executionResults[i+1][1] - executionResults[i][1]
 
 			if newTime <=0:
-				value = 0 
+				value = 0
 				continue
 			else:
-				value = newTime / newSamples ######TODO esta es la clave!!! 
-			
+				value = newTime / newSamples ######TODO esta es la clave!!!
+
 			#weighted sample time, so later executions are more important than the first ones
 			#the reason is that they executed more samples, so their information is more valuable
 			if i==0 or avgSampleTime == 0:
 				avgSampleTime = value
 			else:
 				avgSampleTime = 0.6 * value + 0.4 * avgSampleTime
-		
-			
+
+
 		acumConstantTime = 0
 
 		#this has been modifiied to avoid zero values
 		for i in range(len(executionResults)):
-			acumConstantTime += max(0, executionResults[i][1] - executionResults[i][0] *  avgSampleTime) 
+			acumConstantTime += max(0, executionResults[i][1] - executionResults[i][0] *  avgSampleTime)
 		avgConstantTime = acumConstantTime / numSimulations
-		
-		
-		normalizedSampleEffort = avgSampleTime * gridTask.host.getWhetstones() 
-		normalizedConstantEffort = avgConstantTime * gridTask.host.getWhetstones() 
-		
-		
+
+
+		normalizedSampleEffort = avgSampleTime * gridTask.host.getWhetstones()
+		normalizedConstantEffort = avgConstantTime * gridTask.host.getWhetstones()
+
+
 		print("RESULTADO DEL PROFILING")
 		print ("task id: " + gridTask.gwID)
 		print("normalizado, this_sample_effort = " + str(normalizedSampleEffort))
@@ -337,29 +337,47 @@ class Application(Base):
 			print ("A normalized effort below zero makes no sense, dismissing profile")
 			return
 		self.profile.updateInfoAfterProfiling(normalizedConstantEffort, normalizedSampleEffort)
-	
+
 		Session.add(self.profile)
-	
-	
-	
+
+
+		#Con los pilots ha funcionado distinto.
+		#Cuando envias la tarea, se resta ya de las pendientes. Así que luego cuando acaba no hay que restar nada.
+		#Si ha fallado, hay que volver a incrementar el numero de tareas pendientes.
+		#a parte, como esto lo vamos a hacer llamando al metodo normal, hay que hacer alguna ñapa con el numero de tareas
+	def updateInfoAfterExecutionInPilots(self, gridTask):
+
+
+		self.updateInfoAfterExecution(gridTask)
+
+		#queremos aumentar el numero de tareas otra vez (porque lo restamos al enviarla, y el updateInfo... lo vuelve a restar)
+		# -si ha acabado OK, para que el numero de pendientes se quede como estaba
+		# - si NO ha acabado Ok, para que se vuelva a incrementar, ya que lo restamos al enviarla
+		self.remainingSamples += gridTask.realSamples
+		Session.add(self)
+
+
+
+
+
 	#the idea behind this method is that in only consults the file size once each execution. Then, variable self.inputFileSize
-	#acts like a cache, thus speeding up the process	
+	#acts like a cache, thus speeding up the process
 	def calculateInputFileSize(self):
-		
+
 		if self.size >=0:
 			return self.size
-		
+
 		if self.workingDirectory == None:
 			filePath = "."
 		else:
 			filePath = self.workingDirectory
-		
+
 		if self.inputFiles == None:
 			print ("No input files")
 			self.size = 0
 			return
-		
-		totalFilesize = 0	
+
+		totalFilesize = 0
 		for inputFile in self.inputFiles.split(","):
 			completeFileName = filePath + "/" + inputFile
 			if not os.path.exists(completeFileName):
@@ -369,21 +387,21 @@ class Application(Base):
 				sys.exit()
 			fileSize= os.path.getsize(completeFileName)
 			totalFilesize +=fileSize
-		
+
 		#KB to MB
 		totalFilesize = totalFilesize / 1024
-		
+
 		self.size = totalFilesize
 		return totalFilesize
-			
-			
-			
+
+
+
 	def exportInfoToFile(self, path):
 		result=""
 		result+="<name>" + self.name + "</name>\n"
 		result+="<constant_effort>" + str(self.profile.constantEffort) + "</constant_effort>\n"
 		result+="<sample_effort>" + str(self.profile.sampleEffort) + "</sample_effort>\n"
-		
+
 		f = open(path, 'w')
 		f.write(result)
 		f.close()
